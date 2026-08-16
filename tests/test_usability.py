@@ -306,11 +306,34 @@ class GlobalArchiveUsabilityTests(unittest.TestCase):
         self.assertIn("001-2026-01-01-alpha.md", ctx)
         self.assertIn("reading global archive", err.getvalue())
 
-    def test_session_start_dir_and_global_mutually_exclusive(self) -> None:
-        err = StringIO()
-        with self.assertRaises(SystemExit) as ctx, redirect_stderr(err):
-            acc_session_start.main(["--dir", str(self.global_dir), "--global"])
-        self.assertEqual(ctx.exception.code, 2)
+    def test_env_var_tilde_is_expanded_in_all_four_scripts(self) -> None:
+        # A quoted ACC_GLOBAL_DIR="~/..." reaches Python unexpanded by the
+        # shell; without expanduser() it would resolve to a literal "~"
+        # directory under the cwd. Sweep all four global_dir() copies so the
+        # fix cannot drift out of any one of them.
+        modules = [list_acc, acc_session_start, _load("new_acc"), _load("find_latest_acc")]
+        # expanduser() reads $HOME (POSIX) / %USERPROFILE% (Windows), not the
+        # Path.home() this class's setUp mocks — pin the env vars so both
+        # sides of the assertion agree on the same home.
+        home = self.project_root
+        env = {"ACC_GLOBAL_DIR": "~/acc-archive", "HOME": str(home), "USERPROFILE": str(home)}
+        with mock.patch.dict(os.environ, env):
+            for module in modules:
+                with self.subTest(module=module.__name__):
+                    self.assertEqual(module.global_dir(), home / "acc-archive")
+
+    def test_session_start_bad_args_never_block_startup(self) -> None:
+        # --dir and --global together is an argparse error (SystemExit, which
+        # a bare `except Exception` cannot catch), and argparse's native exit
+        # code 2 is the one code the SessionStart protocol treats as BLOCKING.
+        # The hook must remap it to 1: still surfaced on stderr as a logged
+        # non-blocking error, but never able to block session startup.
+        out, err = StringIO(), StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = acc_session_start.main(["--dir", str(self.global_dir), "--global"])
+        self.assertEqual(rc, 1)
+        self.assertEqual(out.getvalue().strip(), "")
+        self.assertIn("usage", err.getvalue())
 
 
 class GlobalHookPrecedenceTests(unittest.TestCase):
