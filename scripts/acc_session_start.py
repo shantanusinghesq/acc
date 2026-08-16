@@ -26,11 +26,13 @@ Behavior:
     a hostile workspace) unless ACC_GLOBAL_ALLOW_OUTSIDE_HOME=1 opts in —
     so a redirected archive is blocked, not just visible.
 
-It is deliberately bulletproof: after argument parsing, any error results in
-a clean exit 0 with no stdout, so a hook misfire can never block session
-startup. (Unknown flags still exit 2 with argparse's usage message — the
-flags live in settings.json, not in data, so a config typo should surface,
-not vanish.) The cwd is taken from the hook's stdin payload (Claude Code
+It is deliberately bulletproof: a runtime error results in a clean exit 0
+with no stdout, and a bad flag (a settings.json typo) exits 1 with
+argparse's usage message on stderr — surfaced as a logged, NON-blocking
+error. argparse's native exit code 2 is remapped because the SessionStart
+protocol treats exit 2 specifically as a blocking error, and no hook
+misfire may block session startup. The cwd is taken from the hook's stdin
+payload (Claude Code
 sends `{"cwd": ...}`), falling back to the process cwd; `--dir` overrides
 both (used by tests).
 
@@ -60,7 +62,7 @@ SOURCE_RE = re.compile(r"^\*\*Source project:\*\*\s*(.+?)\s*$", re.MULTILINE)
 def global_dir() -> Path:
     """The cross-project archive: $ACC_GLOBAL_DIR if set, else ~/.claude/acc."""
     env = os.environ.get("ACC_GLOBAL_DIR")
-    return Path(env) if env else Path.home() / ".claude" / "acc"
+    return Path(env).expanduser() if env else Path.home() / ".claude" / "acc"
 
 
 def find_latest(acc_dir: Path) -> Path | None:
@@ -179,7 +181,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Fall back to the cross-project archive (~/.claude/acc, or "
         "$ACC_GLOBAL_DIR) when the project archive has no entries.",
     )
-    args = parser.parse_args(argv)
+    # argparse exits via SystemExit (a BaseException the except below can't
+    # see) on a bad invocation — e.g. a misconfigured hook command passing
+    # both --dir and --global — and its exit code 2 is exactly the code the
+    # SessionStart protocol treats as a BLOCKING error. Remap to 1: argparse
+    # has already printed usage to stderr, so the config typo still surfaces
+    # as a logged non-blocking error, but can never block session startup.
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit:
+        return 1
 
     try:
         from_global = False
