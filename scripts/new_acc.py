@@ -39,7 +39,7 @@ SEQ_RE = re.compile(r"^(\d{3,})-")
 def global_dir() -> Path:
     """The cross-project archive: $ACC_GLOBAL_DIR if set, else ~/.claude/acc."""
     env = os.environ.get("ACC_GLOBAL_DIR")
-    return Path(env) if env else Path.home() / ".claude" / "acc"
+    return Path(env).expanduser() if env else Path.home() / ".claude" / "acc"
 
 
 def next_seq(acc_dir: Path) -> int:
