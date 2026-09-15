@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import time
@@ -63,9 +62,11 @@ class LifecycleTests(unittest.TestCase):
         final = finalize_acc.publish_draft(draft)
         self.assertEqual(final.name, "002-2026-09-14-new.md")
         self.assertFalse(draft.exists())
-        self.assertEqual(find_latest_acc.find_latest(self.directory), final)
-        self.assertEqual(acc_session_start.find_latest(self.directory), final)
-        self.assertEqual(list_acc.parse_entries(self.directory)[0].path, final)
+        self.assertEqual(find_latest_acc.find_latest(self.directory).resolve(), final.resolve())
+        self.assertEqual(acc_session_start.find_latest(self.directory).resolve(), final.resolve())
+        self.assertEqual(
+            list_acc.parse_entries(self.directory)[0].path.resolve(), final.resolve()
+        )
 
     def test_abandoned_drafts_reserve_their_sequences(self) -> None:
         first = _scaffold(self.directory, "first")
@@ -205,7 +206,7 @@ class LifecycleTests(unittest.TestCase):
         with redirect_stdout(stdout), redirect_stderr(stderr):
             rc = find_latest_acc.main(["--dir", str(self.directory)])
         self.assertEqual(rc, 0)
-        self.assertEqual(Path(stdout.getvalue().strip()), previous)
+        self.assertEqual(Path(stdout.getvalue().strip()).resolve(), previous.resolve())
         self.assertIn("automatic latest selection skips this sequence", stderr.getvalue())
 
     def test_unfinished_legacy_checkpoint_has_visible_diagnostic(self) -> None:
@@ -336,8 +337,8 @@ class LifecycleTests(unittest.TestCase):
 
         # The reserved draft can still be resumed and published after the crash.
         published = finalize_acc.publish_draft(draft)
-        self.assertEqual(published, final)
-        self.assertEqual(find_latest_acc.find_latest(self.directory), final)
+        self.assertEqual(published.resolve(), final.resolve())
+        self.assertEqual(find_latest_acc.find_latest(self.directory).resolve(), final.resolve())
 
 
 class ConcurrentProducerTests(unittest.TestCase):

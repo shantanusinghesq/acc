@@ -439,7 +439,7 @@ class SnapshotProcessSafetyTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.dest = self.tmp / "snaps"
         self.transcript = self.tmp / "session.jsonl"
-        self.transcript.write_bytes((b'{"turn":1}\n' * 10000))
+        self.transcript.write_bytes(b'{"turn":1}\n' * 10000)
 
     @staticmethod
     def _wait_for(path: Path, process: subprocess.Popen, timeout: float = 5.0) -> None:

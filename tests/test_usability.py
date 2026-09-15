@@ -13,7 +13,7 @@ import json
 import os
 import sys
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -221,11 +221,10 @@ class SessionStartHookTests(unittest.TestCase):
         empty = self.dir / "empty"
         empty.mkdir()
         out, err = StringIO(), StringIO()
-        with (
-            mock.patch.dict(os.environ, {"ACC_GLOBAL_DIR": str(gdir)}),
-            redirect_stdout(out),
-            redirect_stderr(err),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.dict(os.environ, {"ACC_GLOBAL_DIR": str(gdir)}))
+            stack.enter_context(redirect_stdout(out))
+            stack.enter_context(redirect_stderr(err))
             rc = acc_session_start.main(["--dir", str(empty)])
         self.assertEqual(rc, 0)
         self.assertEqual(out.getvalue().strip(), "")
@@ -235,15 +234,16 @@ class SessionStartHookTests(unittest.TestCase):
         # Unexpected post-argparse failure stays nonblocking and content-free.
         _entry(self.dir, "001-2026-01-01-alpha.md", "a")
         out, err = StringIO(), StringIO()
-        with (
-            mock.patch.object(
-                acc_session_start,
-                "build_context",
-                side_effect=RuntimeError("sensitive checkpoint content"),
-            ),
-            redirect_stdout(out),
-            redirect_stderr(err),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(
+                mock.patch.object(
+                    acc_session_start,
+                    "build_context",
+                    side_effect=RuntimeError("sensitive checkpoint content"),
+                )
+            )
+            stack.enter_context(redirect_stdout(out))
+            stack.enter_context(redirect_stderr(err))
             rc = acc_session_start.main(["--dir", str(self.dir)])
         self.assertEqual(rc, 0)
         self.assertEqual(out.getvalue(), "")
@@ -433,10 +433,9 @@ class GlobalHookPrecedenceTests(unittest.TestCase):
         fake_home = Path(self._tmp.name) / "home"
         fake_home.mkdir()
         env = {"ACC_GLOBAL_ALLOW_OUTSIDE_HOME": "1"}
-        with (
-            mock.patch.object(Path, "home", return_value=fake_home),
-            mock.patch.dict(os.environ, env),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(Path, "home", return_value=fake_home))
+            stack.enter_context(mock.patch.dict(os.environ, env))
             rc, out, err = self._run_hook()
         self.assertEqual(rc, 0)
         ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
@@ -456,11 +455,10 @@ class GlobalDirSurfacingTests(unittest.TestCase):
     def test_env_override_is_named_in_stderr(self) -> None:
         gdir = (self.root / "global-acc").resolve()
         err = StringIO()
-        with (
-            mock.patch.dict(os.environ, {"ACC_GLOBAL_DIR": str(gdir)}),
-            mock.patch.object(Path, "home", return_value=self.root),
-            redirect_stderr(err),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.dict(os.environ, {"ACC_GLOBAL_DIR": str(gdir)}))
+            stack.enter_context(mock.patch.object(Path, "home", return_value=self.root))
+            stack.enter_context(redirect_stderr(err))
             trusted = acc_session_start._surface_global_read(gdir)
         self.assertTrue(trusted)
         self.assertIn("reading global archive", err.getvalue())
@@ -482,11 +480,12 @@ class GlobalDirSurfacingTests(unittest.TestCase):
         fake_home.mkdir()
         gdir = (self.root / "elsewhere").resolve()
         err = StringIO()
-        with (
-            mock.patch.object(Path, "home", return_value=fake_home),
-            mock.patch.dict(os.environ, {"ACC_GLOBAL_ALLOW_OUTSIDE_HOME": "1"}),
-            redirect_stderr(err),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(Path, "home", return_value=fake_home))
+            stack.enter_context(
+                mock.patch.dict(os.environ, {"ACC_GLOBAL_ALLOW_OUTSIDE_HOME": "1"})
+            )
+            stack.enter_context(redirect_stderr(err))
             trusted = acc_session_start._surface_global_read(gdir)
         self.assertTrue(trusted)
         self.assertIn("loading anyway", err.getvalue())

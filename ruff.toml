@@ -9,3 +9,6 @@ include = ["scripts/**/*.py", "tests/**/*.py"]
 [lint]
 # pycodestyle (E/W), pyflakes (F), isort (I), pyupgrade (UP), flake8-bugbear (B).
 select = ["E", "W", "F", "I", "UP", "B"]
+# The shipped runtime is Python 3.8. Keep typing.List/Optional/Tuple forms
+# rather than letting pyupgrade normalize them to newer spelling.
+ignore = ["UP006", "UP037", "UP045"]
