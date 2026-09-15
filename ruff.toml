@@ -1,6 +1,6 @@
 # Lint/format config for the ACC helper scripts and their tests.
 # Kept intentionally small: this repo ships a skill bundle, not a package.
-target-version = "py310"
+target-version = "py38"
 line-length = 100
 
 # Only our Python lives in these two dirs; everything else is docs/assets.

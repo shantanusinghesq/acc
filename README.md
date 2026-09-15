@@ -30,7 +30,7 @@ There are good ones (mem0, Zep, REMvisual/claude-handoff). They're mostly retent
 
 ## Two modes
 
-- **Produce.** `/acc [focus]` extracts the five sections from the current session and writes `docs/acc/NNN-YYYY-MM-DD-topic.md` in the project being worked on.
+- **Produce.** `/acc [focus]` extracts the five sections into an excluded `docs/acc/_draft-NNN-YYYY-MM-DD-topic.md`, then validates and publishes it as `docs/acc/NNN-YYYY-MM-DD-topic.md` in the project being worked on.
 - **Consume.** `/acc invoke-last` loads the newest archive entry into a fresh session as inherited context.
 
 ## Requirements
@@ -95,6 +95,20 @@ The skill will first decide whether the session even warrants an `acc` (that's t
 
 If `/acc` isn't recognized, restart Claude Code and check that `SKILL.md` lives at the expected path: `~/.claude/skills/acc/SKILL.md` on macOS/Linux, or `%USERPROFILE%\.claude\skills\acc\SKILL.md` on Windows.
 
+## Draft and publication lifecycle
+
+Production uses an excluded draft so an interrupted write cannot become the next inherited checkpoint. `new_acc.py` prints the absolute path it reserved:
+
+```bash
+python scripts/new_acc.py --topic auth-rewrite --focus "auth middleware"
+# fill the printed _draft-...md file, including every section and token estimate
+python scripts/finalize_acc.py "/absolute/path/to/_draft-NNN-YYYY-MM-DD-topic.md"
+```
+
+Use `python3` for these commands on macOS/Linux. The finalizer validates the checkpoint structure, unresolved template tokens, and the 800-word limit before atomically publishing the corresponding `NNN-YYYY-MM-DD-topic.md`. Structural validation does not establish factual accuracy or prove that every important decision was preserved. The finalizer never overwrites an existing final. A validation or publication failure preserves the draft for correction, and archive readers continue using the newest earlier completed entry.
+
+Atomic publication uses local-filesystem hard links. If the archive or snapshot directory is on a filesystem that does not support them, finalization fails with the draft preserved and the snapshot hook reports the failure without blocking compaction. The remediation tests exercised local NTFS on Windows; network-share coordination, other filesystems, power-loss durability, and POSIX-native behavior require their respective CI or host verification.
+
 ## Auto-load on session start (optional)
 
 Typing `/acc invoke-last` every time is easy to forget. A `SessionStart` hook makes it automatic: every new session in a project that has a `docs/acc/` archive inherits the latest entry, no command needed. Copy `assets/session-start-settings.json` into the project's `.claude/settings.json` (merge it if the file already exists):
@@ -114,11 +128,11 @@ Typing `/acc invoke-last` every time is easy to forget. A `SessionStart` hook ma
 }
 ```
 
-On Windows use `python` and `%USERPROFILE%`. The hook is exit-0-safe (a misfire never blocks startup) and stays silent in projects with no archive, so it's safe to set globally in `~/.claude/settings.json`. `matcher: "startup"` fires on new sessions only, not resumes.
+On Windows, use this exact command in the hook object: `"command": "python \"$HOME/.claude/skills/acc/scripts/acc_session_start.py\""`. Claude Code runs command hooks through Git Bash when available or PowerShell otherwise, and both expand `$HOME`; `%USERPROFILE%` is Command Prompt syntax and does not expand in either hook shell. The hook is exit-0-safe (a misfire never blocks startup) and stays silent in projects with no archive, so it's safe to set globally in `~/.claude/settings.json`. `matcher: "startup"` fires on new sessions only, not resumes.
 
 ## Auto-snapshot before compaction (optional)
 
-The SessionStart hook covers one end of a session; compaction is the other. When a session approaches the context limit, Claude Code replaces its history with a summary — and if no checkpoint was written first, any later ACC is produced *from that summary* instead of from the full window. A `PreCompact` hook closes the gap: it copies the raw transcript to `docs/acc/_snapshots/` (gitignored — transcripts can contain secrets — and pruned to the newest 5) in the moment between "compaction decided" and "history rewritten", so a checkpoint can always be reconstructed from full fidelity. On *auto*-compaction it also asks the model to write the checkpoint right then, while the window is still intact; on manual `/compact` it stays quiet (you chose the timing) and just takes the insurance copy. Copy `assets/pre-compact-settings.json` into the project's `.claude/settings.json`:
+The SessionStart hook covers one end of a session; compaction is the other. When a session approaches the context limit, Claude Code replaces its history with a summary — and if no checkpoint was written first, any later ACC is produced *from that summary* instead of from the full window. A `PreCompact` hook preserves an insurance copy: it copies the raw transcript to `docs/acc/_snapshots/` (gitignored — transcripts can contain secrets — and pruned to the newest 5) in the moment between "compaction decided" and "history rewritten", so a checkpoint can be reconstructed from full fidelity. Both automatic compaction and manual `/compact` create snapshots only. Copy `assets/pre-compact-settings.json` into the project's `.claude/settings.json`:
 
 ```jsonc
 {
@@ -133,7 +147,7 @@ The SessionStart hook covers one end of a session; compaction is the other. When
       {
         "matcher": "manual",
         "hooks": [
-          { "type": "command", "command": "python3 \"$HOME/.claude/skills/acc/scripts/acc_pre_compact.py\" --snapshot-only", "timeout": 10 }
+          { "type": "command", "command": "python3 \"$HOME/.claude/skills/acc/scripts/acc_pre_compact.py\"", "timeout": 10 }
         ]
       }
     ]
@@ -141,28 +155,35 @@ The SessionStart hook covers one end of a session; compaction is the other. When
 }
 ```
 
-Same conventions as the SessionStart hook: `python` and `%USERPROFILE%` on Windows, exit-0-safe (a misfire never blocks compaction). Whether the auto-compaction nudge reaches the model before the summary pass is harness-dependent — the snapshot is the guarantee; the nudge is best-effort.
+On Windows, use `"command": "python \"$HOME/.claude/skills/acc/scripts/acc_pre_compact.py\""` for both matcher entries. Keep `$HOME` for either Git Bash or PowerShell. The hook emits no stdout. Missing input stays quiet; unexpected operational failures produce one bounded stderr diagnostic and exit 0 so they do not block compaction. Unknown flags and invalid values retain argparse's exit 2 behavior.
+
+Snapshot retention uses recorded publication counters within each UTC second, independent of session and trigger names. Legacy snapshots remain eligible for retention; when old same-second names contain tied counters and therefore no recoverable chronology, the filename is the deterministic tie-break.
+
+This snapshot-only design was verified against Claude Code 2.1.272 and the current [PreCompact](https://code.claude.com/docs/en/hooks#precompact) and [context-output](https://code.claude.com/docs/en/hooks#add-context-for-claude) contracts. PreCompact supports blocking compaction, but it is not listed among the events that inject `additionalContext` into the model.
 
 ## Browse the archive
 
-Once an archive has more than a handful of entries:
+Once an archive has more than a handful of completed entries:
 
 ```bash
 python scripts/list_acc.py                 # dated, focus-labeled table, newest first
 python scripts/list_acc.py --markdown      # Markdown table you can paste into a README index
 ```
 
+Archive consumers order the numeric sequence, including after `999`, and ignore excluded drafts and recognizable incomplete legacy scaffolds. They report those scaffolds on stderr. If multiple completed legacy files claim one sequence, automatic latest selection reports the duplicate and skips that ambiguous sequence in favor of the newest unique sequence. This prevents abandoned, partially filled, or ambiguous checkpoints from becoming inherited context.
+
 ## Global vs per-project archive
 
 By default every entry lands in `./docs/acc/` of the project you're in — checkpoints live with the code they describe. If you'd rather keep **one archive across all projects** (handy when you hop between many repos), pass `--global` to any of the scripts:
 
 ```bash
-python scripts/new_acc.py --topic auth-rewrite --global   # writes ~/.claude/acc/NNN-…md
+python scripts/new_acc.py --topic auth-rewrite --global   # prints the reserved _draft path
+python scripts/finalize_acc.py "/absolute/path/to/_draft-NNN-YYYY-MM-DD-topic.md" # validates and publishes
 python scripts/find_latest_acc.py --global                # newest entry in the global archive
 python scripts/list_acc.py --global                       # browse the global archive
 ```
 
-The global location is `~/.claude/acc`, overridable with the `ACC_GLOBAL_DIR` environment variable. `--global` and `--dir` are mutually exclusive. The global archive holds only entries explicitly written with `--global` — per-project `docs/acc/` directories are never scanned into it. Entries written by `new_acc.py --global` are stamped with a `**Source project:**` line recording where they were produced; entries predating the stamp (or written by hand) lack it.
+The global location is `~/.claude/acc`, overridable with the `ACC_GLOBAL_DIR` environment variable. `--global` and `--dir` are mutually exclusive. The global archive holds only entries explicitly created with `--global` and then published with `finalize_acc.py` — per-project `docs/acc/` directories are never scanned into it. Drafts created by `new_acc.py --global` are stamped with a `**Source project:**` line recording where they were produced; entries predating the stamp (or written by hand) lack it.
 
 For the SessionStart hook, append `--global` to the command in `settings.json` to fall back to the shared archive. The project's own `docs/acc/` still takes precedence — the global archive is consulted only when the project has no checkpoints — and a globally-sourced checkpoint is injected with a preamble that names its source project (or says it came from an unspecified project when the entry carries no stamp) and frames it as background context rather than work to continue, so a session in project B can't be misdirected into continuing project A's work. Every archive read the hook makes under `--global` is logged to stderr, and a global archive outside your home directory is refused outright — a hostile workspace can set `ACC_GLOBAL_DIR`, so out-of-home locations load only if you opt in with `ACC_GLOBAL_ALLOW_OUTSIDE_HOME=1`.
 
@@ -173,14 +194,18 @@ Two trust notes. Checkpoints in the global archive travel between projects by de
 | Path | Purpose |
 |---|---|
 | `SKILL.md` | Skill definition: process steps, rules, bundled resources |
-| `scripts/new_acc.py` | Scaffold a new `acc` entry (produce mode); `--dry-run` to preview |
-| `scripts/find_latest_acc.py` | Locate the newest entry (consume mode) |
-| `scripts/list_acc.py` | Print the archive as an index (`--markdown` for a table) |
+| `scripts/acc_archive.py` | Shared archive locking, parsing, numeric ordering, and checkpoint validation |
+| `scripts/new_acc.py` | Reserve and scaffold an excluded draft (produce mode); `--dry-run` to preview |
+| `scripts/finalize_acc.py` | Validate and atomically publish a completed draft without overwriting a final |
+| `scripts/find_latest_acc.py` | Locate the highest numeric completed entry (consume mode) |
+| `scripts/list_acc.py` | Print completed entries as an index (`--markdown` for a table) |
 | `scripts/acc_session_start.py` | SessionStart hook: auto-load the latest entry into a fresh session |
+| `scripts/acc_pre_compact.py` | PreCompact hook: save a snapshot-only insurance copy and retain the newest 5 |
 | `assets/acc-template.md` | Canonical output skeleton |
 | `assets/docs-acc-readme.md` | README seed dropped into `docs/acc/` on first run |
 | `assets/global-acc-readme.md` | README seed dropped into the global archive on first run |
 | `assets/session-start-settings.json` | Example `.claude/settings.json` for the hook |
+| `assets/pre-compact-settings.json` | Example `.claude/settings.json` for the PreCompact hook |
 | `references/necessity-check.md` | The Step 0 rubric, 9 criteria for `acc` vs. `HANDOFF` |
 | `references/example-acc.md` | Good vs. bad worked example |
 | `tests/` | Unit, skill-integrity, and usability tests (stdlib `unittest`) |
@@ -196,19 +221,24 @@ test suite (no `pip` install needed). From the repo root:
 python -m unittest discover -s tests
 ```
 
-The suite covers three layers. `test_scripts.py` pins the behaviors the
-helper scripts must get right every time: latest-entry selection
-(lexicographic sort, `README.md` excluded) and next-entry numbering
-(zero-padded, monotonic), plus slug generation, template substitution,
-and exit codes. `test_usability.py` exercises the SessionStart hook
+The suite covers the archive lifecycle as well as the individual helpers.
+`test_scripts.py` pins slug generation, template substitution, archive
+selection, numbering, and exit codes. `test_archive_lifecycle.py` exercises
+draft exclusion, validation and atomic publication, numeric ordering across
+digit boundaries, abandoned drafts, competing producers, and fresh-process
+create/finalize/restart behavior. `test_usability.py` exercises the SessionStart hook
 end-to-end — archive resolution and project-before-global precedence,
 fail-open exit behavior, stderr provenance logging — and pins both
 injected preamble formats (project-local vs. globally-sourced), since
 that framing is part of the hook's security surface.
-`test_skill_integrity.py` validates the bundle itself —
-SKILL.md frontmatter, that every bundled file it advertises exists, and
+`test_pre_compact.py` covers snapshot creation, retention, and fail-open hook
+behavior, while `test_installers.py` checks installer safety in temporary
+fixtures.
+`test_skill_integrity.py` checks the bundle itself —
+expected flat SKILL.md frontmatter fields and quoted description shape, that every bundled file it advertises exists, and
 that every `{{TOKEN}}` the scaffolder substitutes is present in the
 template (so a rename never ships a literal `{{DATE}}` to users).
+Actual Claude loader acceptance requires validation by the installed host.
 
 CI also runs `ruff check`, `ruff format --check`, and `compileall` over
 `scripts/` and `tests/`; reproduce that locally with:
@@ -267,7 +297,10 @@ git -c safe.directory=<absolute-path-to-repo> <command>
 ```
 
 **`acc` entries are landing in the wrong project.**
-By default the scripts write to `./docs/acc/` relative to the current working directory at the moment the skill runs — not to a global location unless `--global` was passed (see "Global vs per-project archive" above). If entries end up in the wrong place, check Claude Code's working directory.
+By default the scripts create drafts in `./docs/acc/` relative to the current working directory at the moment the skill runs — not in the global archive unless `--global` was passed (see "Global vs per-project archive" above). If drafts end up in the wrong place, check Claude Code's working directory before filling or finalizing them.
+
+**A new checkpoint does not appear in `invoke-last` or `list_acc.py`.**
+`new_acc.py` creates an excluded `_draft-…md` file. Fill every section and replace every template token, then run `python scripts/finalize_acc.py <draft-path>` (`python3` on macOS/Linux). If validation fails, the command reports the defects and preserves the draft for correction.
 
 ## When not to use this
 

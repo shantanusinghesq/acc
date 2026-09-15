@@ -38,12 +38,25 @@ def _load(name: str):
 
 find_latest_acc = _load("find_latest_acc")
 new_acc = _load("new_acc")
+finalize_acc = _load("finalize_acc")
 
 
 def _touch(directory: Path, name: str) -> Path:
     p = directory / name
     p.write_text("stub\n", encoding="utf-8")
     return p
+
+
+def _fill_and_publish(draft: Path) -> Path:
+    body = draft.read_text(encoding="utf-8")
+    body = body.replace("{{TOKENS_BEFORE}}", "10").replace("{{TOKENS_AFTER}}", "1")
+    body = body.replace("- D: \n", "- D: Preserve the tested contract.\n")
+    body = body.replace("## Current State\n- \n", "## Current State\n- Test fixture ready.\n")
+    body = body.replace("- Q: \n", "- Q: None.\n")
+    body = body.replace("- X: \n", "- X: None.\n")
+    body = body.replace("## Next Actions\n1. \n", "## Next Actions\n1. Continue.\n")
+    draft.write_text(body, encoding="utf-8")
+    return finalize_acc.publish_draft(draft)
 
 
 class FindLatestTests(unittest.TestCase):
@@ -62,13 +75,13 @@ class FindLatestTests(unittest.TestCase):
         _touch(self.dir, "README.md")
         self.assertIsNone(find_latest_acc.find_latest(self.dir))
 
-    def test_picks_highest_lexicographically(self) -> None:
+    def test_picks_highest_numeric_sequence(self) -> None:
         _touch(self.dir, "001-2026-01-01-alpha.md")
         _touch(self.dir, "002-2026-02-01-beta.md")
         latest = _touch(self.dir, "010-2026-03-01-gamma.md")
         self.assertEqual(find_latest_acc.find_latest(self.dir), latest)
 
-    def test_zero_padding_keeps_order_past_ten_and_hundred(self) -> None:
+    def test_numeric_order_handles_ten_and_hundred(self) -> None:
         _touch(self.dir, "009-2026-01-01-a.md")
         _touch(self.dir, "099-2026-01-01-b.md")
         latest = _touch(self.dir, "100-2026-01-01-c.md")
@@ -168,10 +181,10 @@ class NewAccMainTests(unittest.TestCase):
     def _run(self, *args: str) -> int:
         return new_acc.main(["--dir", str(self.dir), *args])
 
-    def test_creates_entry_with_padded_name(self) -> None:
+    def test_creates_excluded_draft_with_padded_name(self) -> None:
         rc = self._run("--topic", "Auth Rewrite", "--date", "2026-05-27")
         self.assertEqual(rc, 0)
-        out = self.dir / "001-2026-05-27-auth-rewrite.md"
+        out = self.dir / "_draft-001-2026-05-27-auth-rewrite.md"
         self.assertTrue(out.is_file())
 
     def test_seeds_readme_on_first_run(self) -> None:
@@ -180,7 +193,7 @@ class NewAccMainTests(unittest.TestCase):
 
     def test_substitutes_date_and_focus(self) -> None:
         self._run("--topic", "alpha", "--focus", "the auth layer", "--date", "2026-01-01")
-        body = (self.dir / "001-2026-01-01-alpha.md").read_text(encoding="utf-8")
+        body = (self.dir / "_draft-001-2026-01-01-alpha.md").read_text(encoding="utf-8")
         self.assertNotIn("{{DATE}}", body)
         self.assertNotIn("{{FOCUS}}", body)
         self.assertIn("2026-01-01", body)
@@ -188,13 +201,13 @@ class NewAccMainTests(unittest.TestCase):
 
     def test_focus_defaults_to_topic(self) -> None:
         self._run("--topic", "auth-rewrite", "--date", "2026-01-01")
-        body = (self.dir / "001-2026-01-01-auth-rewrite.md").read_text(encoding="utf-8")
+        body = (self.dir / "_draft-001-2026-01-01-auth-rewrite.md").read_text(encoding="utf-8")
         self.assertIn("auth-rewrite", body)
 
     def test_second_run_increments_sequence(self) -> None:
         self._run("--topic", "alpha", "--date", "2026-01-01")
         self._run("--topic", "beta", "--date", "2026-01-02")
-        self.assertTrue((self.dir / "002-2026-01-02-beta.md").is_file())
+        self.assertTrue((self.dir / "_draft-002-2026-01-02-beta.md").is_file())
 
     def test_invalid_date_exit_2(self) -> None:
         self.assertEqual(self._run("--topic", "alpha", "--date", "not-a-date"), 2)
@@ -204,9 +217,9 @@ class NewAccMainTests(unittest.TestCase):
         with redirect_stdout(buf):
             rc = self._run("--topic", "alpha", "--date", "2026-01-01", "--dry-run")
         self.assertEqual(rc, 0)
-        self.assertIn("001-2026-01-01-alpha.md", buf.getvalue())
+        self.assertIn("_draft-001-2026-01-01-alpha.md", buf.getvalue())
         # Nothing should have been created on disk.
-        self.assertFalse((self.dir / "001-2026-01-01-alpha.md").exists())
+        self.assertFalse((self.dir / "_draft-001-2026-01-01-alpha.md").exists())
         self.assertFalse((self.dir / "README.md").exists())
         self.assertFalse(self.dir.exists())
 
@@ -216,8 +229,8 @@ class NewAccMainTests(unittest.TestCase):
         with redirect_stdout(buf):
             rc = self._run("--topic", "beta", "--date", "2026-01-02", "--dry-run")
         self.assertEqual(rc, 0)
-        self.assertIn("002-2026-01-02-beta.md", buf.getvalue())
-        self.assertFalse((self.dir / "002-2026-01-02-beta.md").exists())
+        self.assertIn("_draft-002-2026-01-02-beta.md", buf.getvalue())
+        self.assertFalse((self.dir / "_draft-002-2026-01-02-beta.md").exists())
 
     def test_dir_and_global_are_mutually_exclusive(self) -> None:
         err = StringIO()
@@ -231,7 +244,7 @@ class NewAccMainTests(unittest.TestCase):
         # so a collision only happens if numbering is forced backwards. Pin
         # next_seq to 1 with 001 already on disk to exercise the guard.
         self.dir.mkdir(parents=True, exist_ok=True)
-        _touch(self.dir, "001-2026-01-01-alpha.md")
+        _touch(self.dir, "_draft-001-2026-01-01-alpha.md")
         original = new_acc.next_seq
         new_acc.next_seq = lambda _dir: 1
         self.addCleanup(setattr, new_acc, "next_seq", original)
@@ -289,11 +302,12 @@ class GlobalArchiveTests(unittest.TestCase):
         with redirect_stdout(buf):
             rc = new_acc.main(["--topic", "alpha", "--date", "2026-01-01", "--global"])
         self.assertEqual(rc, 0)
-        self.assertTrue((self.global_dir / "001-2026-01-01-alpha.md").is_file())
+        self.assertTrue((self.global_dir / "_draft-001-2026-01-01-alpha.md").is_file())
 
     def test_find_latest_global_reads_global_archive(self) -> None:
         with redirect_stdout(StringIO()):
             new_acc.main(["--topic", "alpha", "--date", "2026-01-01", "--global"])
+        _fill_and_publish(self.global_dir / "_draft-001-2026-01-01-alpha.md")
         buf = StringIO()
         with redirect_stdout(buf):
             rc = find_latest_acc.main(["--global"])
@@ -306,7 +320,7 @@ class GlobalArchiveTests(unittest.TestCase):
             new_acc.main(["--topic", "alpha", "--date", "2026-01-01", "--global"])
             project = Path(self._tmp.name) / "docs" / "acc"
             new_acc.main(["--topic", "beta", "--date", "2026-01-02", "--dir", str(project)])
-        self.assertTrue((project / "001-2026-01-02-beta.md").is_file())
+        self.assertTrue((project / "_draft-001-2026-01-02-beta.md").is_file())
 
     def test_global_entry_carries_source_stamp(self) -> None:
         # Issue #6: global entries record the producing project so the
@@ -314,13 +328,17 @@ class GlobalArchiveTests(unittest.TestCase):
         with redirect_stdout(StringIO()):
             rc = new_acc.main(["--topic", "alpha", "--date", "2026-01-01", "--global"])
         self.assertEqual(rc, 0)
-        body = (self.global_dir / "001-2026-01-01-alpha.md").read_text(encoding="utf-8")
+        body = (self.global_dir / "_draft-001-2026-01-01-alpha.md").read_text(
+            encoding="utf-8"
+        )
         self.assertIn(f"**Source project:** {Path.cwd()}", body)
 
     def test_source_stamp_lands_after_focus_line(self) -> None:
         with redirect_stdout(StringIO()):
             new_acc.main(["--topic", "alpha", "--date", "2026-01-01", "--global"])
-        text = (self.global_dir / "001-2026-01-01-alpha.md").read_text(encoding="utf-8")
+        text = (self.global_dir / "_draft-001-2026-01-01-alpha.md").read_text(
+            encoding="utf-8"
+        )
         lines = text.splitlines()
         focus_at = next(i for i, line in enumerate(lines) if line.startswith("**Focus:**"))
         self.assertTrue(lines[focus_at + 1].startswith("**Source project:**"))
@@ -329,7 +347,7 @@ class GlobalArchiveTests(unittest.TestCase):
         project = Path(self._tmp.name) / "docs" / "acc"
         with redirect_stdout(StringIO()):
             new_acc.main(["--topic", "alpha", "--date", "2026-01-01", "--dir", str(project)])
-        body = (project / "001-2026-01-01-alpha.md").read_text(encoding="utf-8")
+        body = (project / "_draft-001-2026-01-01-alpha.md").read_text(encoding="utf-8")
         self.assertNotIn("**Source project:**", body)
 
     def test_global_archive_gets_global_readme_seed(self) -> None:

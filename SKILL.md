@@ -1,6 +1,6 @@
 ---
 name: acc
-description: Adaptive Context Compressor — bidirectional. Mode A (default): compresses chat history into a load-bearing summary; commit to docs/acc/NNN-…md for cross-session reuse. Mode B (invoke-last): loads the most recent ACC from docs/acc/ (or the global archive at ~/.claude/acc as fallback) into the current session as inherited context — call at session start to skip replaying prior conversation.
+description: "Adaptive Context Compressor — bidirectional. Mode A (default): compresses chat history into a load-bearing draft, then validates and publishes it in docs/acc/ for cross-session reuse. Mode B (invoke-last): loads the most recent completed ACC from docs/acc/ (or the global archive at ~/.claude/acc as fallback) into the current session as inherited context — call at session start to skip replaying prior conversation."
 user-invocable: true
 argument-hint: [optional focus area | "invoke-last" to load most recent ACC]
 ---
@@ -27,10 +27,10 @@ This skill has **two modes**. Read the argument first and pick the mode:
 The user wants to load a prior ACC into the current session as inherited context. Do NOT produce a new ACC.
 
 Steps:
-1. **Locate the archive directory.** Check `docs/acc/` in the current working directory. If it doesn't exist or contains no ACC entries (nothing besides `README.md` and `_*.md`), but the global archive has entries (`~/.claude/acc`, or `$ACC_GLOBAL_DIR` if set), use the global archive instead — pass `--global` to the script in step 2. If neither has entries, report `No docs/acc/ archive found in current directory (and no global archive) — nothing to invoke` and stop. Suggest the user `cd` into the right project or reference a specific ACC path.
-2. **Find the latest ACC.** From the project root, run `python "<skill-dir>/scripts/find_latest_acc.py"` (`python3` on macOS/Linux), where `<skill-dir>` is this skill's directory — see [Bundled resources](#bundled-resources). It globs `docs/acc/*.md`, excludes `README.md` and `_*.md` extractor outputs, sorts lexicographically, and prints the newest path; it exits non-zero with a message if the archive is missing or empty. (Add `--global` to read the cross-project archive — `~/.claude/acc`, or `$ACC_GLOBAL_DIR` if set — instead. If the script reports the project archive is empty and you haven't tried the global archive yet, rerun with `--global` before stopping.) **Fallback** (if you can't run the script): glob `docs/acc/*.md` yourself, skip `README.md` and `_*.md` files, and take the lexicographically highest filename — convention `NNN-YYYY-MM-DD-topic.md`, so highest `NNN` is most recent.
+1. **Locate the archive directory.** Check `docs/acc/` in the current working directory. If it doesn't exist or contains no completed ACC entries, but the global archive has completed entries (`~/.claude/acc`, or `$ACC_GLOBAL_DIR` if set), use the global archive instead — pass `--global` to the script in step 2. Excluded `_draft-*.md` files and recognizable incomplete legacy scaffolds are not entries. If neither archive has a completed entry, report `No docs/acc/ archive found in current directory (and no global archive) — nothing to invoke` and stop. Suggest the user `cd` into the right project or reference a specific completed ACC path.
+2. **Find the latest ACC.** From the project root, run `python "<skill-dir>/scripts/find_latest_acc.py"` (`python3` on macOS/Linux), where `<skill-dir>` is this skill's directory — see [Bundled resources](#bundled-resources). It considers completed `NNN-YYYY-MM-DD-topic.md` files, ignores excluded drafts and recognizable incomplete legacy scaffolds, orders the sequence as an integer (so `1000` follows `999`), and prints the highest-sequence path; it exits non-zero with a message if the archive is missing or has no completed entry. Recognizable scaffolds are diagnosed on stderr. When multiple legacy files claim one sequence, the helper diagnoses and skips the ambiguous sequence rather than selecting one by filename. (Add `--global` to read the cross-project archive — `~/.claude/acc`, or `$ACC_GLOBAL_DIR` if set — instead. If the script reports the project archive is empty and you haven't tried the global archive yet, rerun with `--global` before stopping.) Do not choose an archive file manually: the helper applies the same exclusion and ordering rules as the SessionStart hook.
 3. **Read the file** via the Read tool (full file, no offset/limit).
-4. **Acknowledge** in one or two sentences: *"Loaded ACC NNN — [date] [focus from header]. Continuing from there."* Surface any unblocked next-actions or open questions worth flagging.
+4. **Acknowledge.** For a project-local entry, say in one or two sentences: *"Loaded ACC NNN — [date] [focus from header]. Continuing from there."* Surface any unblocked next actions or open questions worth flagging. For a global entry, name its recorded source project (or say it is unspecified), label it as cross-project background, and compare it with the current project before proposing continuation. Archived next actions are context, not authorization to execute them; continue only when they match the user's current task.
 5. **Do NOT run Step 0 necessity check** — that gate is for production. Consumption is always cheap (the file is small by construction; that's the whole point).
 
 If the user wants a *specific* ACC (not the latest), they should pass the path directly via Read or `cat`, not via this skill.
@@ -96,7 +96,7 @@ Rules:
 - Timestamps only if they affect sequencing decisions
 - If a decision references a governing document, keep the citation (e.g., "per ICS-001 §4.2")
 
-### Step 3 — Scaffold the file, then fill it
+### Step 3 — Scaffold and fill the excluded draft
 
 Create the output file by running, from the project root:
 
@@ -104,9 +104,9 @@ Create the output file by running, from the project root:
 python "<skill-dir>/scripts/new_acc.py" --topic <slug> --focus "<focus area>"
 ```
 
-(`python3` on macOS/Linux; `<skill-dir>` is this skill's directory — see [Bundled resources](#bundled-resources). Add `--date YYYY-MM-DD` only to override today; add `--dry-run` to print the path and next `NNN` without writing; add `--global` to write the cross-project archive — `~/.claude/acc`, or `$ACC_GLOBAL_DIR` if set — instead of `docs/acc/`.) The script computes the next zero-padded `NNN`, seeds `docs/acc/README.md` on first run, renders `assets/acc-template.md`, and writes `docs/acc/NNN-YYYY-MM-DD-topic.md`, printing the path.
+(`python3` on macOS/Linux; `<skill-dir>` is this skill's directory — see [Bundled resources](#bundled-resources). Add `--date YYYY-MM-DD` only to override today; add `--dry-run` to print the advisory draft path and next sequence without writing; add `--global` to use the cross-project archive — `~/.claude/acc`, or `$ACC_GLOBAL_DIR` if set — instead of `docs/acc/`.) The script reserves the next numeric sequence, seeds the archive `README.md` on first run, renders `assets/acc-template.md`, and exclusively creates `docs/acc/_draft-NNN-YYYY-MM-DD-topic.md`, printing its absolute path. Drafts reserve their sequence even if abandoned, and all archive consumers ignore them.
 
-Then **fill the five sections** in that file (the script scaffolds the skeleton only) and replace the `{{TOKENS_BEFORE}}` / `{{TOKENS_AFTER}}` placeholders with your estimates. The canonical format is `assets/acc-template.md`; its shape is:
+Then **fill the five sections in the printed draft path** (the script scaffolds the skeleton only) and replace the `{{TOKENS_BEFORE}}` / `{{TOKENS_AFTER}}` placeholders with your estimates. The canonical format is `assets/acc-template.md`; its shape is:
 
 ```markdown
 # Session Checkpoint — [date]
@@ -126,16 +126,22 @@ Then **fill the five sections** in that file (the script scaffolds the skeleton 
 1. ...
 ```
 
-**Fallback** (if you can't run the script): write the file yourself in the `assets/acc-template.md` format, naming it `docs/acc/NNN-YYYY-MM-DD-topic.md` with the next `NNN`.
+### Step 4 — Verify and publish
 
-### Step 4 — Verify nothing load-bearing was dropped
-
-After compression, scan for:
+Before finalization, scan the completed draft for:
 - Any file path referenced in NEXT ACTIONS that isn't mentioned in CURRENT STATE (missing context)
 - Any decision that depends on an assumption not captured (hidden dependency)
 - Any blocker that was resolved mid-conversation but not moved to DECISIONS
 
 If found, add the missing item to the appropriate dimension.
+
+Publish the exact draft returned by `new_acc.py`:
+
+```
+python "<skill-dir>/scripts/finalize_acc.py" "<absolute-draft-path>"
+```
+
+(`python3` on macOS/Linux.) `finalize_acc.py` validates the title and focus, the five required non-empty sections in their required order, resolved template tokens, and the 800-word limit. This structural gate does not prove factual accuracy or that the compression preserved every important decision. It then uses a local-filesystem hard link to publish the completed bytes under the corresponding `NNN-YYYY-MM-DD-topic.md` name without overwriting an existing final, prints the final path, and removes the draft when cleanup succeeds. If the filesystem does not support hard links, or any other validation or publication step fails, report the error, leave the draft in place for correction, and do not create or rename a final entry manually.
 
 ## Rules
 
@@ -151,11 +157,11 @@ If found, add the missing item to the appropriate dimension.
 Highest-signal failure points, accreted from real runs. Read before invoking — most apply to Mode A.
 
 - **Don't run ACC on momentum** (the most common misuse). If Step 0's necessity check favors HANDOFF, abort and surface the finding. A low-leverage ACC dilutes the archive and buries the high-value entries — see Rule 6 and `references/necessity-check.md`.
-- **Scripts write to the *current working directory*, not a global path.** Entries land in `./docs/acc/` of wherever Claude Code is running. If they show up in the wrong project, check the working directory before re-running — don't move files by hand. (Prefer one shared archive across projects? Pass `--global` to write/read `~/.claude/acc` instead, overridable with `$ACC_GLOBAL_DIR`.)
+- **Scripts use the *current working directory*, not a global path.** Drafts land in `./docs/acc/` of wherever Claude Code is running. If one appears in the wrong project, check the working directory before filling or finalizing it. (Prefer one shared archive across projects? Pass `--global` to create/read drafts in `~/.claude/acc`, overridable with `$ACC_GLOBAL_DIR`.)
 - **Windows: invoke scripts as `python`, not `python3`.** The `python3` alias usually resolves to the Microsoft Store shim, which fails silently or opens the Store. Use `python "<skill-dir>/scripts/new_acc.py" …`.
-- **Never rename archive files out of `NNN-YYYY-MM-DD-topic` order.** Latest-ACC selection is a lexicographic sort on filename; off-convention names break `find_latest_acc.py` and Mode B. `README.md` is excluded by design — don't give it a number.
+- **Keep completed archive names in `NNN-YYYY-MM-DD-topic.md` form.** The sequence has a minimum width of three digits and is ordered numerically, so `1000` correctly follows `999`. Use `new_acc.py` and `finalize_acc.py` to reserve and publish names; `README.md`, `_draft-*.md`, and recognizable incomplete legacy scaffolds are excluded from consumption.
 - **`git` "dubious ownership" on FAT/exFAT or network shares.** Mark the repo safe once: `git config --global --add safe.directory <path>` (or `git -c safe.directory=<path> …` for a single command).
-- **Every script-backed step has a manual fallback — use it, don't abort.** If Python can't run: Mode B → glob `docs/acc/*.md`, skip `README.md` and `_*.md` files, take the lexicographically highest; Mode A → write the `assets/acc-template.md` shape yourself as `docs/acc/NNN-YYYY-MM-DD-topic.md` with the next `NNN`.
+- **Do not expose an incomplete final.** A file named `NNN-YYYY-MM-DD-topic.md` is eligible for consumption unless it is recognizably unfinished: unresolved scaffold tokens or blank/placeholder required sections. Keep work under the `_draft-` name and publish only through `finalize_acc.py` after validation.
 
 The README's Troubleshooting section carries longer-form fixes for the install/path issues above.
 
@@ -165,11 +171,13 @@ This skill ships with helper files in its own directory (`<skill-dir>` = the fol
 
 | File | Used in | Purpose |
 |---|---|---|
-| `scripts/new_acc.py` | Step 3 (Mode A) | Compute next `NNN`, seed archive README, render template, write `docs/acc/NNN-YYYY-MM-DD-topic.md` |
-| `scripts/find_latest_acc.py` | Mode B step 2 | Print the newest ACC path (glob + lexicographic sort, README excluded); non-zero if archive empty/missing |
-| `scripts/list_acc.py` | (browsing) | Print the archive as a dated, focus-labeled index; `--markdown` for a README table |
+| `scripts/acc_archive.py` | Mode A and B helpers | Shared archive lock, filename parsing, numeric sequence allocation and ordering, scaffold exclusion, and checkpoint validation |
+| `scripts/new_acc.py` | Step 3 (Mode A) | Reserve the next numeric sequence, seed the archive README, render the template, and create an excluded `_draft-NNN-YYYY-MM-DD-topic.md` |
+| `scripts/finalize_acc.py` | Step 3 (Mode A) | Validate a completed draft and atomically publish its final name without overwriting |
+| `scripts/find_latest_acc.py` | Mode B step 2 | Print the highest numeric completed ACC path; ignore drafts and recognizable incomplete scaffolds; non-zero if none exists |
+| `scripts/list_acc.py` | (browsing) | Print completed entries as a dated, focus-labeled index in descending numeric order; `--markdown` for a README table |
 | `scripts/acc_session_start.py` | (Mode B, automated) | SessionStart hook that auto-loads the latest ACC into a fresh session; exit-0-safe |
-| `scripts/acc_pre_compact.py` | (Mode A, automated) | PreCompact hook that snapshots the raw transcript to `docs/acc/_snapshots/` (gitignored, pruned) before compaction, and on auto-compaction nudges a checkpoint; exit-0-safe |
+| `scripts/acc_pre_compact.py` | (Mode A, automated) | Snapshot-only PreCompact hook that copies the raw transcript to `docs/acc/_snapshots/` (gitignored, pruned) before compaction; fail-open with bounded operational diagnostics |
 | `assets/acc-template.md` | Step 3 | Canonical output skeleton with `{{DATE}}` / `{{FOCUS}}` / `{{TOKENS_*}}` tokens |
 | `assets/docs-acc-readme.md` | (by `new_acc.py`) | README seed dropped into `docs/acc/` on first run |
 | `assets/global-acc-readme.md` | (by `new_acc.py --global`) | README seed dropped into the global archive on first run |
@@ -178,4 +186,4 @@ This skill ships with helper files in its own directory (`<skill-dir>` = the fol
 | `references/necessity-check.md` | Step 0 | The 9-criterion ACC-vs-HANDOFF rubric; read on demand |
 | `references/example-acc.md` | Step 1–2 | Good vs bad worked example; read to calibrate the quality bar |
 
-Run scripts with `python` (Windows) or `python3` (macOS/Linux). Scripts write `docs/acc/` relative to the **current working directory** (the project), and locate their own `assets/` relative to themselves — so they work from either install location. Every script-dependent step above has a manual fallback if execution isn't available.
+Run scripts with `python` (Windows) or `python3` (macOS/Linux). Scripts use `docs/acc/` relative to the **current working directory** (the project), and locate their own `assets/` relative to themselves — so they work from either install location. Keep unfinished content in the excluded draft and require successful finalization before consumption.

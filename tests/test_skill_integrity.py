@@ -18,6 +18,7 @@ rest of the suite:
 
 from __future__ import annotations
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -26,6 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SKILL_MD = REPO_ROOT / "SKILL.md"
 TEMPLATE = REPO_ROOT / "assets" / "acc-template.md"
 NEW_ACC_SRC = REPO_ROOT / "scripts" / "new_acc.py"
+PRE_COMPACT_SETTINGS = REPO_ROOT / "assets" / "pre-compact-settings.json"
 
 # Code-span paths in SKILL.md that point at bundled files.
 BUNDLED_PATH_RE = re.compile(r"`((?:scripts|assets|references)/[\w./-]+\.(?:py|md))`")
@@ -70,6 +72,40 @@ class FrontmatterTests(unittest.TestCase):
 
     def test_description_non_empty(self) -> None:
         self.assertTrue(self.fm["description"].strip())
+
+    def test_description_is_a_json_compatible_quoted_yaml_scalar(self) -> None:
+        # JSON double-quoted strings are valid YAML scalars. This catches the
+        # previous unquoted colon-space sequences without adding PyYAML as a
+        # runtime or test dependency.
+        raw = self.fm["description"]
+        self.assertTrue(raw.startswith('"') and raw.endswith('"'))
+        self.assertIsInstance(json.loads(raw), str)
+
+
+class PreCompactDistributionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.settings = json.loads(PRE_COMPACT_SETTINGS.read_text(encoding="utf-8"))
+
+    def test_example_commands_are_snapshot_only(self) -> None:
+        groups = self.settings["hooks"]["PreCompact"]
+        commands = [hook["command"] for group in groups for hook in group["hooks"]]
+        self.assertEqual(len(commands), 2)
+        self.assertTrue(all("acc_pre_compact.py" in command for command in commands))
+        self.assertTrue(all("--snapshot-only" not in command for command in commands))
+
+    def test_example_uses_a_hook_shell_variable(self) -> None:
+        text = PRE_COMPACT_SETTINGS.read_text(encoding="utf-8")
+        self.assertIn("$HOME", text)
+        self.assertNotIn("%USERPROFILE%", text)
+
+
+class SessionStartDistributionTests(unittest.TestCase):
+    def test_example_uses_a_hook_shell_variable(self) -> None:
+        text = (REPO_ROOT / "assets" / "session-start-settings.json").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("$HOME", text)
+        self.assertNotIn("%USERPROFILE%", text)
 
 
 class BundledResourceTests(unittest.TestCase):
