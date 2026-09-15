@@ -482,9 +482,7 @@ class GlobalDirSurfacingTests(unittest.TestCase):
         err = StringIO()
         with ExitStack() as stack:
             stack.enter_context(mock.patch.object(Path, "home", return_value=fake_home))
-            stack.enter_context(
-                mock.patch.dict(os.environ, {"ACC_GLOBAL_ALLOW_OUTSIDE_HOME": "1"})
-            )
+            stack.enter_context(mock.patch.dict(os.environ, {"ACC_GLOBAL_ALLOW_OUTSIDE_HOME": "1"}))
             stack.enter_context(redirect_stderr(err))
             trusted = acc_session_start._surface_global_read(gdir)
         self.assertTrue(trusted)

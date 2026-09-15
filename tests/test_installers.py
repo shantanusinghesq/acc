@@ -37,7 +37,10 @@ class InstallerFixture:
 
     def assert_overlap_refused(self, result: subprocess.CompletedProcess[str]) -> None:
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertRegex(result.stdout + result.stderr, r"source and\s+destination overlap")
+        self.assertRegex(
+            result.stdout + result.stderr,
+            r"source\s+and\s+destination overlap",
+        )
 
     def test_copy_install_and_reinstall(self) -> None:
         source = self.make_source(self.root / "checkout")

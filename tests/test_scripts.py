@@ -328,17 +328,13 @@ class GlobalArchiveTests(unittest.TestCase):
         with redirect_stdout(StringIO()):
             rc = new_acc.main(["--topic", "alpha", "--date", "2026-01-01", "--global"])
         self.assertEqual(rc, 0)
-        body = (self.global_dir / "_draft-001-2026-01-01-alpha.md").read_text(
-            encoding="utf-8"
-        )
+        body = (self.global_dir / "_draft-001-2026-01-01-alpha.md").read_text(encoding="utf-8")
         self.assertIn(f"**Source project:** {Path.cwd()}", body)
 
     def test_source_stamp_lands_after_focus_line(self) -> None:
         with redirect_stdout(StringIO()):
             new_acc.main(["--topic", "alpha", "--date", "2026-01-01", "--global"])
-        text = (self.global_dir / "_draft-001-2026-01-01-alpha.md").read_text(
-            encoding="utf-8"
-        )
+        text = (self.global_dir / "_draft-001-2026-01-01-alpha.md").read_text(encoding="utf-8")
         lines = text.splitlines()
         focus_at = next(i for i, line in enumerate(lines) if line.startswith("**Focus:**"))
         self.assertTrue(lines[focus_at + 1].startswith("**Source project:**"))

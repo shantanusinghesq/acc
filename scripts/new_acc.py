@@ -40,6 +40,7 @@ TEMPLATE = ASSETS / "acc-template.md"
 README_SEED = ASSETS / "docs-acc-readme.md"
 GLOBAL_README_SEED = ASSETS / "global-acc-readme.md"
 
+
 def global_dir() -> Path:
     """The cross-project archive: $ACC_GLOBAL_DIR if set, else ~/.claude/acc."""
     env = os.environ.get("ACC_GLOBAL_DIR")
@@ -131,8 +132,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 args.use_global
                 and readme.is_file()
                 and README_SEED.is_file()
-                and readme.read_text(encoding="utf-8")
-                == README_SEED.read_text(encoding="utf-8")
+                and readme.read_text(encoding="utf-8") == README_SEED.read_text(encoding="utf-8")
             )
             if (not readme.exists() or stale) and seed.is_file():
                 readme.write_text(seed.read_text(encoding="utf-8"), encoding="utf-8")

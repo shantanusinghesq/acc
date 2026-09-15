@@ -203,11 +203,7 @@ class PruneTests(unittest.TestCase):
 
     def test_stale_part_files_are_swept(self) -> None:
         self._seed("20260601T000000Z-auto-a-01.jsonl")
-        part = self.dir / (
-            ".acc-snapshot-20260601T000000Z-auto-a-123."
-            + ("a" * 32)
-            + ".part"
-        )
+        part = self.dir / (".acc-snapshot-20260601T000000Z-auto-a-123." + ("a" * 32) + ".part")
         part.write_text("trunc", encoding="utf-8")
         pre_compact.prune(self.dir, keep=5)
         self.assertEqual(list(self.dir.glob("*.part")), [])
@@ -287,9 +283,7 @@ class MainTests(unittest.TestCase):
         self.transcript = self.tmp / "session.jsonl"
         self.transcript.write_text('{"role": "user"}\n', encoding="utf-8")
 
-    def _run(
-        self, payload: object, argv: Optional[List[str]] = None
-    ) -> Tuple[int, str, str]:
+    def _run(self, payload: object, argv: Optional[List[str]] = None) -> Tuple[int, str, str]:
         stdin = StringIO(payload if isinstance(payload, str) else json.dumps(payload))
         out, err = StringIO(), StringIO()
         with mock.patch.object(pre_compact.sys, "stdin", stdin):
@@ -332,9 +326,7 @@ class MainTests(unittest.TestCase):
         self.assertEqual(out, "")
 
     def test_missing_transcript_is_silent_success(self) -> None:
-        rc, out, err = self._run(
-            self._payload(transcript_path=str(self.tmp / "gone.jsonl"))
-        )
+        rc, out, err = self._run(self._payload(transcript_path=str(self.tmp / "gone.jsonl")))
         self.assertEqual(rc, 0)
         self.assertEqual(out, "")
         self.assertEqual(err, "")
@@ -376,9 +368,7 @@ class MainTests(unittest.TestCase):
 
     def test_unexpected_snapshot_failure_is_bounded_and_does_not_echo_error(self) -> None:
         secret = "transcript contents must not appear " + ("x" * 1000)
-        with mock.patch.object(
-            pre_compact, "take_snapshot", side_effect=PermissionError(secret)
-        ):
+        with mock.patch.object(pre_compact, "take_snapshot", side_effect=PermissionError(secret)):
             rc, out, err = self._run(self._payload())
         self.assertEqual(rc, 0)
         self.assertEqual(out, "")
@@ -529,9 +519,7 @@ class SnapshotProcessSafetyTests(unittest.TestCase):
             real_unlink(path, *args, **kwargs)
 
         with mock.patch.object(Path, "unlink", fail_part_unlink):
-            target = pre_compact.take_snapshot(
-                self.transcript, self.dest, "auto", "abc", now=NOW
-            )
+            target = pre_compact.take_snapshot(self.transcript, self.dest, "auto", "abc", now=NOW)
         self.assertEqual(target.read_bytes(), self.transcript.read_bytes())
         self.assertEqual(len(list(self.dest.glob("*.part"))), 1)
         pre_compact.prune(self.dest, keep=5)

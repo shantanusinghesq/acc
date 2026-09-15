@@ -64,9 +64,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertFalse(draft.exists())
         self.assertEqual(find_latest_acc.find_latest(self.directory).resolve(), final.resolve())
         self.assertEqual(acc_session_start.find_latest(self.directory).resolve(), final.resolve())
-        self.assertEqual(
-            list_acc.parse_entries(self.directory)[0].path.resolve(), final.resolve()
-        )
+        self.assertEqual(list_acc.parse_entries(self.directory)[0].path.resolve(), final.resolve())
 
     def test_abandoned_drafts_reserve_their_sequences(self) -> None:
         first = _scaffold(self.directory, "first")
@@ -147,8 +145,7 @@ class LifecycleTests(unittest.TestCase):
         complete.write_text("# Session Checkpoint\n**Focus:** complete\n", encoding="utf-8")
         unfinished = self.directory / "002-2026-01-02-unfinished.md"
         unfinished.write_text(
-            "# Session Checkpoint\n**Focus:** x\n**Token estimate before:** "
-            "~{{TOKENS_BEFORE}}k\n",
+            "# Session Checkpoint\n**Focus:** x\n**Token estimate before:** ~{{TOKENS_BEFORE}}k\n",
             encoding="utf-8",
         )
         self.assertEqual(find_latest_acc.find_latest(self.directory), complete)
@@ -224,9 +221,7 @@ class LifecycleTests(unittest.TestCase):
     def test_dry_run_does_not_create_archive_or_lock(self) -> None:
         output = StringIO()
         with redirect_stdout(output):
-            rc = new_acc.main(
-                ["--dir", str(self.directory), "--topic", "dry", "--dry-run"]
-            )
+            rc = new_acc.main(["--dir", str(self.directory), "--topic", "dry", "--dry-run"])
         self.assertEqual(rc, 0)
         self.assertIn("_draft-001-", output.getvalue())
         self.assertFalse(self.directory.exists())
@@ -363,7 +358,7 @@ class ConcurrentProducerTests(unittest.TestCase):
         # test follows the same path on Windows and POSIX.
         worker = worker.replace(
             "[(time.sleep(.005)) for _ in iter(int,1) if not gate.exists()]",
-            "exec(\"while not gate.exists():\\n time.sleep(.005)\")",
+            'exec("while not gate.exists():\\n time.sleep(.005)")',
         )
         processes = [
             subprocess.Popen(
@@ -499,8 +494,8 @@ class ConcurrentProducerTests(unittest.TestCase):
             "from acc_archive import ArchiveLock; "
             "archive=pathlib.Path(sys.argv[2]); marker=pathlib.Path(sys.argv[3]); "
             "release=pathlib.Path(sys.argv[4]); "
-            "exec(\"with ArchiveLock(archive):\\n marker.touch()\\n "
-            "while not release.exists():\\n  time.sleep(.01)\")"
+            'exec("with ArchiveLock(archive):\\n marker.touch()\\n '
+            'while not release.exists():\\n  time.sleep(.01)")'
         )
         child = subprocess.Popen(
             [

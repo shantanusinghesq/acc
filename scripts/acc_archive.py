@@ -72,9 +72,7 @@ class ArchiveLock:
                         pass
                     handle = None
                 if time.monotonic() >= deadline:
-                    raise TimeoutError(
-                        f"timed out opening archive lock {self.path}"
-                    ) from None
+                    raise TimeoutError(f"timed out opening archive lock {self.path}") from None
                 time.sleep(self.poll)
         assert handle is not None
         while True:
@@ -85,9 +83,7 @@ class ArchiveLock:
             except OSError:
                 if time.monotonic() >= deadline:
                     handle.close()
-                    raise TimeoutError(
-                        f"timed out waiting for archive lock {self.path}"
-                    ) from None
+                    raise TimeoutError(f"timed out waiting for archive lock {self.path}") from None
                 time.sleep(self.poll)
 
     @staticmethod
@@ -206,9 +202,7 @@ def validate_checkpoint(text: str, max_words: int = 800) -> List[str]:
 
     section_words = len(re.findall(r"\S+", "\n".join(bodies.values())))
     if section_words > max_words:
-        errors.append(
-            f"checkpoint sections contain {section_words} words; maximum is {max_words}"
-        )
+        errors.append(f"checkpoint sections contain {section_words} words; maximum is {max_words}")
     return errors
 
 
@@ -298,9 +292,7 @@ def archive_diagnostics(acc_dir: Path) -> List[str]:
                 f"{sequence}: {', '.join(names)}; automatic latest selection skips this sequence"
             )
     for name in sorted(unfinished):
-        messages.append(
-            f"unfinished legacy checkpoint {name} is excluded from automatic loading"
-        )
+        messages.append(f"unfinished legacy checkpoint {name} is excluded from automatic loading")
     return messages
 
 

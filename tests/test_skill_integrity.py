@@ -101,9 +101,7 @@ class PreCompactDistributionTests(unittest.TestCase):
 
 class SessionStartDistributionTests(unittest.TestCase):
     def test_example_uses_a_hook_shell_variable(self) -> None:
-        text = (REPO_ROOT / "assets" / "session-start-settings.json").read_text(
-            encoding="utf-8"
-        )
+        text = (REPO_ROOT / "assets" / "session-start-settings.json").read_text(encoding="utf-8")
         self.assertIn("$HOME", text)
         self.assertNotIn("%USERPROFILE%", text)
 

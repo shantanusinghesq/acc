@@ -64,9 +64,7 @@ SESSION_ID_SAFE_RE = re.compile(r"[^A-Za-z0-9-]")
 # The naming contract take_snapshot() writes and prune() trusts. Anything in
 # the snapshot dir that doesn't match (user-parked files, foreign .jsonl) is
 # never deleted and never counts against --keep.
-SNAPSHOT_RE = re.compile(
-    r"^(\d{8}T\d{6}Z)-(?:auto|manual|unknown)-[A-Za-z0-9-]+-(\d{2,})\.jsonl$"
-)
+SNAPSHOT_RE = re.compile(r"^(\d{8}T\d{6}Z)-(?:auto|manual|unknown)-[A-Za-z0-9-]+-(\d{2,})\.jsonl$")
 PART_RE = re.compile(
     r"^\.acc-snapshot-\d{8}T\d{6}Z-(?:auto|manual|unknown)-"
     r"[A-Za-z0-9-]+-\d+\.[0-9a-f]{32}\.part$"
@@ -226,9 +224,7 @@ def take_snapshot(
         stem = snapshot_stem(trigger, session_id, now or datetime.now(timezone.utc))
         stamp = stem.split("-", 1)[0]
         counter = _next_counter_locked(dest_dir, stamp)
-        part = dest_dir / (
-            f".acc-snapshot-{stem}-{os.getpid()}.{uuid.uuid4().hex}.part"
-        )
+        part = dest_dir / (f".acc-snapshot-{stem}-{os.getpid()}.{uuid.uuid4().hex}.part")
         try:
             with transcript.open("rb") as source, part.open("xb") as destination:
                 shutil.copyfileobj(source, destination)
