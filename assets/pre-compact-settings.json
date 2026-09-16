@@ -1,5 +1,5 @@
 {
-  "comment": "Drop this into a project's .claude/settings.json to snapshot the raw transcript before compaction destroys it (and, on auto-compaction, nudge a checkpoint while the window is still intact). macOS/Linux uses python3 and $HOME; on Windows use python and %USERPROFILE%. matcher 'auto' fires when the token threshold triggers compaction unattended — snapshot + nudge; matcher 'manual' fires on /compact, where you chose the timing yourself — snapshot only. Snapshots land in <project>/docs/acc/_snapshots/ (gitignored, newest 5 kept). The hook is exit-0-safe: a misfire never blocks compaction.",
+  "comment": "Drop this into a project's .claude/settings.json to snapshot the raw transcript before compaction. This file uses the macOS/Linux command: python3 and $HOME. On Windows, replace python3 with python and keep $HOME; both Git Bash and PowerShell expand it. Both auto and manual compaction create snapshots only. Snapshots land in <project>/docs/acc/_snapshots/ (gitignored, newest 5 kept). Operational failures are reported on stderr but exit 0 so they do not block compaction.",
   "hooks": {
     "PreCompact": [
       {
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$HOME/.claude/skills/acc/scripts/acc_pre_compact.py\" --snapshot-only",
+            "command": "python3 \"$HOME/.claude/skills/acc/scripts/acc_pre_compact.py\"",
             "timeout": 10
           }
         ]

@@ -6,8 +6,8 @@ the most recent ACC without anyone remembering to run `/acc invoke-last`
 (Mode B, automated). See the README's "Auto-load on session start" section.
 
 Behavior:
-  * Finds the newest docs/acc/NNN-*.md (lexicographic; README.md and _*.md
-    extractor outputs excluded).
+  * Finds the highest numeric completed docs/acc/NNN-*.md; README.md,
+    excluded drafts/extractor outputs, and recognizable scaffolds are skipped.
   * With --global, the project archive still takes precedence; the
     cross-project archive (~/.claude/acc, or $ACC_GLOBAL_DIR) is consulted
     only when the project has no entries. A globally-sourced checkpoint is
@@ -26,9 +26,10 @@ Behavior:
     a hostile workspace) unless ACC_GLOBAL_ALLOW_OUTSIDE_HOME=1 opts in —
     so a redirected archive is blocked, not just visible.
 
-It is deliberately bulletproof: after argument parsing, any error results in
-a clean exit 0 with no stdout, so a hook misfire can never block session
-startup. (Unknown flags still exit 2 with argparse's usage message — the
+It is deliberately bulletproof: after argument parsing, any unexpected error
+produces one bounded, content-free stderr diagnostic and exits 0 with no
+stdout, so a hook misfire can never block session startup. Expected absent
+input or archives remain quiet. (Unknown flags still exit 2 with argparse's usage message — the
 flags live in settings.json, not in data, so a config typo should surface,
 not vanish.) The cwd is taken from the hook's stdin payload (Claude Code
 sends `{"cwd": ...}`), falling back to the process cwd; `--dir` overrides
@@ -47,10 +48,17 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import List, Optional
+
+try:
+    from acc_archive import archive_diagnostics, find_latest_completed
+except ModuleNotFoundError:  # Imported by path from the repository test suite.
+    from scripts.acc_archive import archive_diagnostics, find_latest_completed
 
 # Cap how much we inject; ACCs are tiny by design (<800 words), but guard
 # against a hand-edited monster file blowing up the context window.
 MAX_BYTES = 16_000
+DIAGNOSTIC_LIMIT = 300
 
 # new_acc.py --global stamps this line into global entries so a cross-project
 # consumer can say where a checkpoint came from.
@@ -63,18 +71,11 @@ def global_dir() -> Path:
     return Path(env) if env else Path.home() / ".claude" / "acc"
 
 
-def find_latest(acc_dir: Path) -> Path | None:
-    if not acc_dir.is_dir():
-        return None
-    candidates = sorted(
-        p
-        for p in acc_dir.glob("*.md")
-        if p.name.lower() != "readme.md" and not p.name.startswith("_")
-    )
-    return candidates[-1] if candidates else None
+def find_latest(acc_dir: Path) -> Optional[Path]:
+    return find_latest_completed(acc_dir)
 
 
-def _cwd_from_stdin() -> str | None:
+def _cwd_from_stdin() -> Optional[str]:
     """Claude Code passes a JSON payload on stdin including the project cwd."""
     if sys.stdin is None or sys.stdin.isatty():
         return None
@@ -164,7 +165,21 @@ def build_context(latest: Path, display: str, *, from_global: bool = False) -> s
     )
 
 
-def main(argv: list[str] | None = None) -> int:
+def _report_archive_diagnostics(acc_dir: Path) -> None:
+    for diagnostic in archive_diagnostics(acc_dir):
+        print(f"acc_session_start: {diagnostic}", file=sys.stderr)
+
+
+def _report_failure(error: Exception) -> None:
+    error_name = re.sub(r"[^A-Za-z0-9_]", "", type(error).__name__)[:64] or "Exception"
+    message = (
+        f"acc_session_start: context loading failed ({error_name}); "
+        "check checkpoint readability and archive permissions. Session startup was not blocked."
+    )
+    print(message[:DIAGNOSTIC_LIMIT], file=sys.stderr)
+
+
+def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="SessionStart hook: load latest ACC.")
     where = parser.add_mutually_exclusive_group()
     where.add_argument(
@@ -185,10 +200,14 @@ def main(argv: list[str] | None = None) -> int:
         from_global = False
         if args.dir is not None:
             base = Path(os.getcwd()).resolve()
-            latest = find_latest(Path(args.dir).resolve())
+            archive = Path(args.dir).resolve()
+            _report_archive_diagnostics(archive)
+            latest = find_latest(archive)
         else:
             base = Path(_cwd_from_stdin() or os.getcwd()).resolve()
-            latest = find_latest(base / "docs" / "acc")
+            archive = base / "docs" / "acc"
+            _report_archive_diagnostics(archive)
+            latest = find_latest(archive)
             if args.use_global:
                 if latest is not None:
                     print(
@@ -200,6 +219,7 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     gdir = global_dir().resolve()
                     if _surface_global_read(gdir):
+                        _report_archive_diagnostics(gdir)
                         latest = find_latest(gdir)
                         from_global = latest is not None
 
@@ -215,8 +235,9 @@ def main(argv: list[str] | None = None) -> int:
             }
         }
         print(json.dumps(envelope))
-    except Exception:
+    except Exception as error:
         # Never let a hook failure block the session.
+        _report_failure(error)
         return 0
     return 0
 

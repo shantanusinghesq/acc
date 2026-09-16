@@ -9,23 +9,27 @@ compressions of past working sessions, produced by the `/acc` skill.
 NNN-YYYY-MM-DD-topic.md
 ```
 
-- `NNN` — zero-padded sequence number (`001`, `002`, …). Highest number = newest.
+- `NNN` — sequence number with a minimum width of three digits (`001`, `002`, …, `999`, `1000`). Highest numeric value = newest.
 - `YYYY-MM-DD` — date the ACC was produced.
 - `topic` — short kebab-case focus slug.
 
-Filenames sort **lexicographically**, so the highest filename is always the most
-recent ACC. Tooling (`find_latest_acc.py`, `new_acc.py`) relies on this — do not
-rename files out of sequence.
+Tooling parses and orders the sequence numerically, so digit-width changes after
+`999` do not affect which completed ACC is newest. Keep completed filenames in
+the convention above; use the producer and finalizer rather than renaming them.
 
 ## Lifecycle
 
-- **Producer (Mode A)** — `/acc [focus]` compresses the current session and writes a
-  new `NNN-…md` entry here.
+- **Producer (Mode A)** — `/acc [focus]` first reserves an excluded
+  `_draft-NNN-…md`. It fills that draft, then `finalize_acc.py` validates and
+  publishes the corresponding `NNN-…md` without overwriting an existing final.
 - **Consumer (Mode B)** — `/acc invoke-last` loads the newest entry into a fresh
   session as inherited context, so you skip replaying prior conversation.
 
 ## Notes
 
-- This `README.md` is **excluded** from the "latest ACC" search.
+- This `README.md`, `_draft-*.md` files, and recognizable incomplete legacy
+  scaffolds are **excluded** from the "latest ACC" search and archive listing.
+- An abandoned draft continues to reserve its sequence. Correct and finalize it,
+  or leave it excluded; do not rename incomplete content to a final filename.
 - Each entry is meant to stand alone: someone should be able to continue the work
   from the ACC alone, without re-reading the original conversation.

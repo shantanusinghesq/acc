@@ -13,10 +13,11 @@ import json
 import os
 import sys
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Optional, Tuple
 from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -35,7 +36,7 @@ list_acc = _load("list_acc")
 acc_session_start = _load("acc_session_start")
 
 
-def _entry(directory: Path, name: str, focus: str | None = None) -> Path:
+def _entry(directory: Path, name: str, focus: Optional[str] = None) -> Path:
     p = directory / name
     header = f"# Session Checkpoint\n**Focus:** {focus}\n" if focus else "# no header\n"
     p.write_text(header, encoding="utf-8")
@@ -79,9 +80,9 @@ class ListAccParseTests(unittest.TestCase):
         _entry(self.dir, "001-2026-01-01-auth-rewrite.md")  # no Focus header
         self.assertEqual(list_acc.parse_entries(self.dir)[0].focus, "auth-rewrite")
 
-    def test_focus_ignores_unrendered_placeholder(self) -> None:
+    def test_recognizable_unrendered_checkpoint_is_excluded(self) -> None:
         _entry(self.dir, "001-2026-01-01-auth-rewrite.md", "{{FOCUS}}")
-        self.assertEqual(list_acc.parse_entries(self.dir)[0].focus, "auth-rewrite")
+        self.assertEqual(list_acc.parse_entries(self.dir), [])
 
 
 class ListAccRenderTests(unittest.TestCase):
@@ -91,7 +92,7 @@ class ListAccRenderTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         _entry(self.dir, "001-2026-01-01-alpha.md", "alpha focus")
 
-    def _run(self, *args: str) -> tuple[int, str]:
+    def _run(self, *args: str) -> Tuple[int, str]:
         buf = StringIO()
         with redirect_stdout(buf):
             rc = list_acc.main(["--dir", str(self.dir), *args])
@@ -125,7 +126,7 @@ class SessionStartHookTests(unittest.TestCase):
         self.dir = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
 
-    def _run(self, *args: str) -> tuple[int, str]:
+    def _run(self, *args: str) -> Tuple[int, str]:
         buf = StringIO()
         with redirect_stdout(buf):
             rc = acc_session_start.main(["--dir", str(self.dir), *args])
@@ -220,28 +221,35 @@ class SessionStartHookTests(unittest.TestCase):
         empty = self.dir / "empty"
         empty.mkdir()
         out, err = StringIO(), StringIO()
-        with (
-            mock.patch.dict(os.environ, {"ACC_GLOBAL_DIR": str(gdir)}),
-            redirect_stdout(out),
-            redirect_stderr(err),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.dict(os.environ, {"ACC_GLOBAL_DIR": str(gdir)}))
+            stack.enter_context(redirect_stdout(out))
+            stack.enter_context(redirect_stderr(err))
             rc = acc_session_start.main(["--dir", str(empty)])
         self.assertEqual(rc, 0)
         self.assertEqual(out.getvalue().strip(), "")
         self.assertEqual(err.getvalue(), "")
 
-    def test_internal_error_is_silent_exit_0(self) -> None:
-        # Pin the bulletproof contract: any post-argparse failure -> exit 0,
-        # no stdout — narrowing the blanket except would only be caught here.
+    def test_internal_error_is_bounded_diagnostic_exit_0(self) -> None:
+        # Unexpected post-argparse failure stays nonblocking and content-free.
         _entry(self.dir, "001-2026-01-01-alpha.md", "a")
-        buf = StringIO()
-        with (
-            mock.patch.object(acc_session_start, "build_context", side_effect=RuntimeError),
-            redirect_stdout(buf),
-        ):
+        out, err = StringIO(), StringIO()
+        with ExitStack() as stack:
+            stack.enter_context(
+                mock.patch.object(
+                    acc_session_start,
+                    "build_context",
+                    side_effect=RuntimeError("sensitive checkpoint content"),
+                )
+            )
+            stack.enter_context(redirect_stdout(out))
+            stack.enter_context(redirect_stderr(err))
             rc = acc_session_start.main(["--dir", str(self.dir)])
         self.assertEqual(rc, 0)
-        self.assertEqual(buf.getvalue(), "")
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("context loading failed (RuntimeError)", err.getvalue())
+        self.assertNotIn("sensitive checkpoint content", err.getvalue())
+        self.assertLessEqual(len(err.getvalue().rstrip("\n")), acc_session_start.DIAGNOSTIC_LIMIT)
 
 
 class CwdFromStdinTests(unittest.TestCase):
@@ -340,7 +348,7 @@ class GlobalHookPrecedenceTests(unittest.TestCase):
         home_patcher.start()
         self.addCleanup(home_patcher.stop)
 
-    def _run_hook(self) -> tuple[int, str, str]:
+    def _run_hook(self) -> Tuple[int, str, str]:
         out, err = StringIO(), StringIO()
         with redirect_stdout(out), redirect_stderr(err):
             rc = acc_session_start.main(["--global"])
@@ -425,10 +433,9 @@ class GlobalHookPrecedenceTests(unittest.TestCase):
         fake_home = Path(self._tmp.name) / "home"
         fake_home.mkdir()
         env = {"ACC_GLOBAL_ALLOW_OUTSIDE_HOME": "1"}
-        with (
-            mock.patch.object(Path, "home", return_value=fake_home),
-            mock.patch.dict(os.environ, env),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(Path, "home", return_value=fake_home))
+            stack.enter_context(mock.patch.dict(os.environ, env))
             rc, out, err = self._run_hook()
         self.assertEqual(rc, 0)
         ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
@@ -448,11 +455,10 @@ class GlobalDirSurfacingTests(unittest.TestCase):
     def test_env_override_is_named_in_stderr(self) -> None:
         gdir = (self.root / "global-acc").resolve()
         err = StringIO()
-        with (
-            mock.patch.dict(os.environ, {"ACC_GLOBAL_DIR": str(gdir)}),
-            mock.patch.object(Path, "home", return_value=self.root),
-            redirect_stderr(err),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.dict(os.environ, {"ACC_GLOBAL_DIR": str(gdir)}))
+            stack.enter_context(mock.patch.object(Path, "home", return_value=self.root))
+            stack.enter_context(redirect_stderr(err))
             trusted = acc_session_start._surface_global_read(gdir)
         self.assertTrue(trusted)
         self.assertIn("reading global archive", err.getvalue())
@@ -474,11 +480,10 @@ class GlobalDirSurfacingTests(unittest.TestCase):
         fake_home.mkdir()
         gdir = (self.root / "elsewhere").resolve()
         err = StringIO()
-        with (
-            mock.patch.object(Path, "home", return_value=fake_home),
-            mock.patch.dict(os.environ, {"ACC_GLOBAL_ALLOW_OUTSIDE_HOME": "1"}),
-            redirect_stderr(err),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(Path, "home", return_value=fake_home))
+            stack.enter_context(mock.patch.dict(os.environ, {"ACC_GLOBAL_ALLOW_OUTSIDE_HOME": "1"}))
+            stack.enter_context(redirect_stderr(err))
             trusted = acc_session_start._surface_global_read(gdir)
         self.assertTrue(trusted)
         self.assertIn("loading anyway", err.getvalue())

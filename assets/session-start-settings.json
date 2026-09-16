@@ -1,5 +1,5 @@
 {
-  "comment": "Drop this into a project's .claude/settings.json to auto-load the latest ACC at session start (Mode B, automated). macOS/Linux uses python3 and $HOME; on Windows use python and %USERPROFILE%. Adjust the path if your skills dir differs. matcher 'startup' fires on new sessions only (not resume). Append --global to the command to fall back to the cross-project archive (~/.claude/acc, or $ACC_GLOBAL_DIR) when the project archive has no entries — the project's own docs/acc/ still takes precedence.",
+  "comment": "Drop this into a project's .claude/settings.json to auto-load the latest ACC at session start (Mode B, automated). macOS/Linux uses python3 and $HOME; on Windows use python and $HOME. Adjust the path if your skills dir differs. matcher 'startup' fires on new sessions only (not resume). Append --global to the command to fall back to the cross-project archive (~/.claude/acc, or $ACC_GLOBAL_DIR) when the project archive has no entries — the project's own docs/acc/ still takes precedence.",
   "hooks": {
     "SessionStart": [
       {

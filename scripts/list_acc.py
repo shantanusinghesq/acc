@@ -20,10 +20,17 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import NamedTuple
+from typing import List, NamedTuple, Optional
 
-# NNN-YYYY-MM-DD-topic.md — the archive's naming contract.
-ENTRY_RE = re.compile(r"^(\d{3,})-(\d{4}-\d{2}-\d{2})-(.+)\.md$")
+try:
+    from acc_archive import ENTRY_RE, archive_diagnostics, is_recognizably_unfinished
+except ModuleNotFoundError:  # Imported by path from the repository test suite.
+    from scripts.acc_archive import (
+        ENTRY_RE,
+        archive_diagnostics,
+        is_recognizably_unfinished,
+    )
+
 # `**Focus:** the auth layer` header line in each entry.
 FOCUS_RE = re.compile(r"^\*\*Focus:\*\*\s*(.+?)\s*$", re.MULTILINE)
 
@@ -54,23 +61,23 @@ def _read_focus(path: Path, fallback: str) -> str:
     return focus if focus and focus != "{{FOCUS}}" else fallback
 
 
-def parse_entries(acc_dir: Path) -> list[Entry]:
-    """Return archive entries sorted newest-first (highest filename first)."""
-    entries: list[Entry] = []
+def parse_entries(acc_dir: Path) -> List[Entry]:
+    """Return completed archive entries newest-first by numeric sequence."""
+    entries: List[Entry] = []
     if not acc_dir.is_dir():
         return entries
-    for p in sorted(acc_dir.glob("*.md"), reverse=True):
-        if p.name.lower() == "readme.md":
+    for p in acc_dir.glob("*.md"):
+        if not p.is_file() or p.is_symlink() or is_recognizably_unfinished(p):
             continue
         m = ENTRY_RE.match(p.name)
         if not m:
             continue
         seq, date, slug = m.groups()
         entries.append(Entry(seq, date, slug, _read_focus(p, slug), p))
-    return entries
+    return sorted(entries, key=lambda entry: (int(entry.seq), entry.path.name), reverse=True)
 
 
-def render_text(entries: list[Entry]) -> str:
+def render_text(entries: List[Entry]) -> str:
     rows = [("ACC", "DATE", "FOCUS", "FILE")]
     rows += [(e.seq, e.date, e.focus, e.path.name) for e in entries]
     widths = [max(len(row[i]) for row in rows) for i in range(4)]
@@ -79,14 +86,14 @@ def render_text(entries: list[Entry]) -> str:
     )
 
 
-def render_markdown(entries: list[Entry]) -> str:
+def render_markdown(entries: List[Entry]) -> str:
     lines = ["| ACC | Date | Focus | File |", "|---|---|---|---|"]
     for e in entries:
         lines.append(f"| {e.seq} | {e.date} | {e.focus} | [`{e.path.name}`]({e.path.name}) |")
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="List the ACC archive as an index.")
     where = parser.add_mutually_exclusive_group()
     where.add_argument("--dir", default=None, help="Archive dir (default: docs/acc under cwd).")
@@ -107,6 +114,9 @@ def main(argv: list[str] | None = None) -> int:
     if not acc_dir.is_dir():
         print(f"No ACC archive found at {acc_dir} - nothing to list.", file=sys.stderr)
         return 1
+
+    for diagnostic in archive_diagnostics(acc_dir):
+        print(f"list_acc: {diagnostic}", file=sys.stderr)
 
     entries = parse_entries(acc_dir)
     if not entries:
