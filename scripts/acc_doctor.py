@@ -115,7 +115,9 @@ def _read_regular_text(path: Path, expected: os.stat_result) -> str:
         or len(content) != expected.st_size
     ):
         raise _EntryChanged()
-    return content.decode("utf-8")
+    # Match Path.read_text() universal newlines used by the archive readers.
+    # Byte budgets above continue to apply to the original on-disk content.
+    return content.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _new_report(directory: Path) -> Dict[str, Any]:

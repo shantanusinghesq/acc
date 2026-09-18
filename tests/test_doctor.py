@@ -233,6 +233,39 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(len(unfinished), 2)
         self.assertEqual(report["latest"], acc_archive.find_latest_completed(self.archive).name)
 
+    def test_line_endings_preserve_complete_and_unfinished_loader_semantics(self) -> None:
+        for label, separators in (
+            ("crlf", ("\r\n",)),
+            ("cr", ("\r",)),
+            ("mixed", ("\r\n", "\r", "\n")),
+        ):
+            for unfinished in (False, True):
+                with self.subTest(line_endings=label, unfinished=unfinished):
+                    directory = self.archive / f"{label}-{unfinished}"
+                    directory.mkdir()
+                    older = directory / "001-2026-09-17-stable.md"
+                    older.write_bytes(COMPLETE.encode("utf-8"))
+                    newer = directory / "002-2026-09-17-variant.md"
+                    content = COMPLETE.replace("- Q: None.", "- Q:") if unfinished else COMPLETE
+                    encoded = "".join(
+                        line + separators[index % len(separators)]
+                        for index, line in enumerate(content.splitlines())
+                    ).encode("utf-8")
+                    newer.write_bytes(encoded)
+                    before = _snapshot(self.root)
+                    report = acc_doctor.inspect_archive(directory)
+                    shared_latest = acc_archive.find_latest_completed(directory)
+                    self.assertEqual(report["latest"], shared_latest.name)
+                    self.assertEqual(report["latest"], older.name if unfinished else newer.name)
+                    newer_entry = next(
+                        entry for entry in report["entries"] if entry["name"] == newer.name
+                    )
+                    self.assertEqual(newer_entry["load_eligible"], not unfinished)
+                    self.assertEqual("unfinished_final" in self.codes(report), unfinished)
+                    self.assertEqual(report["status"], "findings" if unfinished else "healthy")
+                    self.assertEqual(_snapshot(self.root), before)
+                    self.assertNotIn(PRIVATE, json.dumps(report))
+
     def test_nonentry_files_and_named_directories_are_not_read_or_loaded(self) -> None:
         latest = self.write("001-2026-09-17-complete.md")
         self.write("README.md", PRIVATE)
