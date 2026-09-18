@@ -217,6 +217,11 @@ def is_recognizably_unfinished(path: Path) -> bool:
         text = Path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         return True
+    return is_recognizably_unfinished_text(text)
+
+
+def is_recognizably_unfinished_text(text: str) -> bool:
+    """Apply the legacy-loading predicate to already-read checkpoint text."""
     if any(token in text for token in KNOWN_TOKENS):
         return True
     bodies, _ = _section_bodies(text)

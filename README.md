@@ -28,10 +28,11 @@ A Step 0 necessity gate that aborts production if a plain `HANDOFF.md` would car
 
 There are good ones (mem0, Zep, REMvisual/claude-handoff). They're mostly retention-maximalist: preserve as much of the session as possible, dossier-style. `acc` is the lossy-digest end of that trade-off. For a 500k-token session with buried load-bearing facts, the dossier approach is probably the right tool. For a one-page checkpoint that seeds the next thread, this one is.
 
-## Two modes
+## Three modes
 
 - **Produce.** `/acc [focus]` extracts the five sections into an excluded `docs/acc/_draft-NNN-YYYY-MM-DD-topic.md`, then validates and publishes it as `docs/acc/NNN-YYYY-MM-DD-topic.md` in the project being worked on.
 - **Consume.** `/acc invoke-last` loads the newest archive entry into a fresh session as inherited context.
+- **Inspect.** `/acc doctor` diagnoses the current archive without changing its contents.
 
 ## Requirements
 
@@ -172,6 +173,46 @@ python scripts/list_acc.py --markdown      # Markdown table you can paste into a
 
 Archive consumers order the numeric sequence, including after `999`, and ignore excluded drafts and recognizable incomplete legacy scaffolds. They report those scaffolds on stderr. If multiple completed legacy files claim one sequence, automatic latest selection reports the duplicate and skips that ambiguous sequence in favor of the newest unique sequence. This prevents abandoned, partially filled, or ambiguous checkpoints from becoming inherited context.
 
+## Inspect archive health
+
+Run `/acc doctor` in Claude Code, or invoke the helper directly:
+
+```bash
+python scripts/acc_doctor.py                       # current project's docs/acc
+python scripts/acc_doctor.py --dir "path/to/archive"
+python scripts/acc_doctor.py --global              # configured global archive only
+python scripts/acc_doctor.py --json                # deterministic JSON, schema version 1
+```
+
+Use `python3` on macOS/Linux. The same options are accepted after `/acc doctor`.
+`--dir` and `--global` are mutually exclusive. Doctor displays the actual inspected
+location and applies the existing archive-selection rules without a global fallback.
+
+The report identifies the latest unique completed checkpoint, duplicate completed
+IDs, excluded drafts and unfinished finals, unreadable files, skipped links, and
+structural validation findings. Drafts are informational. Strict-format warnings
+on legacy checkpoints are reported separately from eligibility to load; doctor
+does not tighten the existing readers' compatibility rules.
+
+Exit codes are **0** for no warning/error findings (including missing archives and
+informational drafts), **1** for warnings, and **2** for invalid invocation or
+incomplete inspection. Automation should check both the exit code and the reported
+archive status: a missing archive is not a healthy populated archive.
+
+Doctor never creates directories or lockfiles, writes archive content, or prints
+checkpoint bodies. It skips entry symlinks rather than reading their targets.
+The inspection is not an atomic snapshot: another process may change the archive
+while it runs. An incomplete inspection cannot certify which entry a later reader
+will load. Doctor does not audit hook settings, transcript snapshots, factual
+accuracy, write permissions, or hard-link support.
+
+Inspection is bounded to 10,000 directory items, 2 MiB per final entry, and a
+64 MiB cumulative read budget; exceeding a read limit produces an
+incomplete-inspection result. At most 200 findings are displayed, with an omitted
+count and status reflecting all findings.
+See the [versioned output contract](references/doctor-output.md) for fields,
+diagnostic codes, and automation guidance.
+
 ## Global vs per-project archive
 
 By default every entry lands in `./docs/acc/` of the project you're in — checkpoints live with the code they describe. If you'd rather keep **one archive across all projects** (handy when you hop between many repos), pass `--global` to any of the scripts:
@@ -199,6 +240,7 @@ Two trust notes. Checkpoints in the global archive travel between projects by de
 | `scripts/finalize_acc.py` | Validate and atomically publish a completed draft without overwriting a final |
 | `scripts/find_latest_acc.py` | Locate the highest numeric completed entry (consume mode) |
 | `scripts/list_acc.py` | Print completed entries as an index (`--markdown` for a table) |
+| `scripts/acc_doctor.py` | Read-only archive diagnostics and latest selection (`--json` for structured output) |
 | `scripts/acc_session_start.py` | SessionStart hook: auto-load the latest entry into a fresh session |
 | `scripts/acc_pre_compact.py` | PreCompact hook: save a snapshot-only insurance copy and retain the newest 5 |
 | `assets/acc-template.md` | Canonical output skeleton |
@@ -234,6 +276,8 @@ that framing is part of the hook's security surface.
 `test_pre_compact.py` covers snapshot creation, retention, and fail-open hook
 behavior, while `test_installers.py` checks installer safety in temporary
 fixtures.
+`test_doctor.py` verifies archive diagnostics, legacy compatibility, JSON/CLI
+behavior, and unchanged fixture contents after inspection.
 `test_skill_integrity.py` checks the bundle itself —
 expected flat SKILL.md frontmatter fields and quoted description shape, that every bundled file it advertises exists, and
 that every `{{TOKEN}}` the scaffolder substitutes is present in the
